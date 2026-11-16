@@ -1,0 +1,18 @@
+# Local development database only. Not used in production.
+# Spring Boot starts it automatically on `./mvnw spring-boot:run`,
+# or start it yourself with `docker compose up -d`.
+services:
+  postgres:
+    image: 'postgres:18'
+    environment:
+      - 'POSTGRES_DB=pulse'
+      - 'POSTGRES_USER=pulse'
+      - 'POSTGRES_PASSWORD=pulse'
+    ports:
+      # Only this machine can reach the database, not the local network.
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - 'pulse-postgres-data:/var/lib/postgresql'
+
+volumes:
+  pulse-postgres-data:

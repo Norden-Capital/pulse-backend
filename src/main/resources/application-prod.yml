@@ -1,0 +1,20 @@
+# Production profile. Activate with SPRING_PROFILES_ACTIVE=prod.
+# No defaults here on purpose: the app fails to start if a required variable is missing.
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  docker:
+    compose:
+      enabled: false
+
+management:
+  endpoint:
+    health:
+      show-details: never
+
+app:
+  proxy-secret: ${APP_PROXY_SECRET}
+  # Fail at startup if the secret is empty, so /api/** is never open by mistake.
+  require-proxy-secret: true
