@@ -80,6 +80,8 @@ Pulse's own things.
    mkdir -p /opt/pulse && chmod 700 /opt/pulse
    # write /opt/pulse/.env from deploy/.env.example
    # passwords and the proxy secret: openssl rand -hex 32 (one each)
+   # APP_FRONTEND_URL, APP_MAIL_FROM: see .env.example
+   # RESEND_API_KEY: Pulse's own Resend key, pasted by the owner
    chmod 600 /opt/pulse/.env
    ```
 3. Firewall: `ufw allow 8091/tcp comment 'pulse api (temporary, until tunnel)'`
@@ -105,8 +107,22 @@ Repo `Norden-Capital/pulse-backend` → Settings → Secrets and variables → A
 a Go SSH client that negotiates the ECDSA host key, so an ed25519 fingerprint fails with
 "host key fingerprint mismatch".
 
-The DB password and the proxy secret are **not** GitHub secrets: they live only in
-`/opt/pulse/.env`.
+The DB password, the proxy secret and the Resend API key are **not** GitHub secrets:
+they live only in `/opt/pulse/.env`.
+
+## Server env vars for auth
+
+Since Module 1 (auth) the API needs three more values in `/opt/pulse/.env`. Compose
+refuses to start if one is missing, and the API refuses to start if one is empty.
+
+| Variable | Value |
+| --- | --- |
+| `APP_FRONTEND_URL` | The website, e.g. `https://pulse-frontend-five-red.vercel.app` (no trailing slash). Email links and the passkey RP ID come from it |
+| `APP_MAIL_FROM` | `"Pulse <no-reply@nordencapital.ca>"` (quoted) |
+| `RESEND_API_KEY` | Pulse's own Resend key, pasted by the owner |
+
+Changing `APP_FRONTEND_URL` (the domain at go-live) means users add their passkeys
+again; passwords keep working.
 
 The job uses a GitHub environment named `production`. GitHub creates it on the first
 run. You can add "required reviewers" to it later.

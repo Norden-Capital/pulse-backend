@@ -37,16 +37,18 @@ class ApiIntegrationTests extends IntegrationTestBase {
 	}
 
 	@Test
-	void unknownApiPathGivesJsonNotFoundWithTheSecret() {
-		assertThat(this.mvc.get().uri("/api/does-not-exist").header(ProxySecretFilter.HEADER, PROXY_SECRET))
-			.hasStatus(404)
+	void unknownApiPathNeedsASessionThenGivesJsonNotFound() {
+		assertThat(client().get("/api/does-not-exist")).hasStatus(401);
+		activeUser("ana@example.com");
+		assertThat(loggedIn("ana@example.com").get("/api/does-not-exist")).hasStatus(404)
 			.bodyJson()
 			.isStrictlyEqualTo("{\"error\":\"not_found\",\"message\":\"Not Found\"}");
 	}
 
 	@Test
 	void wrongMethodGivesJsonMethodNotAllowed() {
-		assertThat(this.mvc.post().uri("/api/ping").header(ProxySecretFilter.HEADER, PROXY_SECRET)).hasStatus(405)
+		activeUser("ana@example.com");
+		assertThat(loggedIn("ana@example.com").post("/api/ping", "")).hasStatus(405)
 			.bodyJson()
 			.isStrictlyEqualTo("{\"error\":\"method_not_allowed\",\"message\":\"Method Not Allowed\"}");
 	}
@@ -69,8 +71,11 @@ class ApiIntegrationTests extends IntegrationTestBase {
 
 	@Test
 	void onlyHealthIsExposed() {
-		assertThat(this.mvc.get().uri("/actuator/info")).hasStatus(404);
-		assertThat(this.mvc.get().uri("/actuator/env")).hasStatus(404);
+		assertThat(this.mvc.get().uri("/actuator/info")).hasStatus(401);
+		activeUser("ana@example.com");
+		Client client = loggedIn("ana@example.com");
+		assertThat(client.get("/actuator/info")).hasStatus(404);
+		assertThat(client.get("/actuator/env")).hasStatus(404);
 	}
 
 }

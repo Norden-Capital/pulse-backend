@@ -51,6 +51,12 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:?set SPRING_DATASOURCE_PASSWORD in .env}
       # Only the Vercel route handler knows it; /api/** answers 403 without it.
       APP_PROXY_SECRET: ${APP_PROXY_SECRET:?set APP_PROXY_SECRET in .env}
+      # Auth (Module 1). The website: links in emails, and its host is the passkey RP ID.
+      APP_FRONTEND_URL: ${APP_FRONTEND_URL:?set APP_FRONTEND_URL in .env}
+      # Sender of the auth emails (verify, reset, account exists).
+      APP_MAIL_FROM: ${APP_MAIL_FROM:?set APP_MAIL_FROM in .env}
+      # Pulse's own Resend API key; the API does not start without it in prod.
+      RESEND_API_KEY: ${RESEND_API_KEY:?set RESEND_API_KEY in .env}
     ports:
       # TEMPORARY: public plain HTTP so the Vercel route handler can proxy /api/*
       # to http://<VPS_HOST>:8091 server-side (the browser only talks to Vercel).

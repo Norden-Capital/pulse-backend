@@ -9,6 +9,13 @@ spring:
     compose:
       enabled: false
 
+server:
+  servlet:
+    session:
+      cookie:
+        # The browser reaches the API over https (through the Vercel proxy).
+        secure: true
+
 management:
   endpoint:
     health:
@@ -18,3 +25,9 @@ app:
   proxy-secret: ${APP_PROXY_SECRET}
   # Fail at startup if the secret is empty, so /api/** is never open by mistake.
   require-proxy-secret: true
+  frontend-url: ${APP_FRONTEND_URL}
+  mail:
+    from: ${APP_MAIL_FROM}
+    resend-api-key: ${RESEND_API_KEY}
+    # Fail at startup instead of silently printing emails to the log.
+    require-resend: true

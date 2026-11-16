@@ -5,7 +5,9 @@ nutrition, progress, AI assistant) that works fully without wearables.
 
 Java 21, Spring Boot 4, PostgreSQL 18, Flyway, Maven wrapper.
 
-Status: **Phase 0 (setup)**. There is only a health check and `GET /api/ping`.
+Status: **Module 1 (auth)**. Register with email verification, login on server
+sessions, password reset, passkeys (Face ID) and sign-in history. The API contract is
+`docs/api/auth.md` in the project hub (outside this repo).
 
 ## Run locally
 
@@ -41,6 +43,27 @@ curl -H 'X-Pulse-Proxy-Secret: dev-secret' http://localhost:8080/api/ping
 
 In the `prod` profile the secret is required: the app does not start without it.
 
+### Auth locally
+
+- Sessions use the `SESSION` cookie; every POST/PUT/PATCH/DELETE needs the
+  `X-XSRF-TOKEN` header with the value of the `XSRF-TOKEN` cookie (get it from
+  `GET /api/auth/csrf`). The frontend's `lib/api.ts` does this; with curl, keep a cookie jar.
+- With `RESEND_API_KEY` empty, emails are **printed to the console** instead of sent.
+  Copy the verify or reset link from the log.
+- Links and passkeys use `APP_FRONTEND_URL` (default `http://localhost:3000`). On
+  `localhost` any port works for passkeys.
+
+```bash
+curl -c jar -b jar http://localhost:8080/api/auth/csrf
+curl -c jar -b jar -H "X-XSRF-TOKEN: $(awk '/XSRF-TOKEN/ {print $7}' jar)" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"me@example.com","password":"a-long-test-password"}' \
+  http://localhost:8080/api/auth/register             # 202, then see the console for the link
+```
+
+In the `prod` profile `APP_FRONTEND_URL`, `APP_MAIL_FROM` and `RESEND_API_KEY` are
+required: the app does not start without them.
+
 ## Test
 
 ```bash
@@ -48,7 +71,8 @@ In the `prod` profile the secret is required: the app does not start without it.
 ```
 
 Integration tests use Testcontainers (a throwaway Postgres 18), so Docker must be
-running. `TestPulseApplication` (in `src/test`) runs the app against such a container.
+running. Emails are captured in tests, never sent. `TestPulseApplication` (in `src/test`)
+runs the app against such a container.
 
 ## Deploy
 

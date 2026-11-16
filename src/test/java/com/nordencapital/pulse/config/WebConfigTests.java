@@ -15,8 +15,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ExtendWith(OutputCaptureExtension.class)
 class WebConfigTests {
 
+	/** The other required app.* settings, so only the proxy secret varies. */
+	static final String[] BASE = { "app.frontend-url=http://localhost:3000", "app.mail.from=Pulse <a@b.c>",
+			"app.auth.verify-ttl=24h", "app.auth.reset-ttl=1h", "app.auth.login-max-failures=5",
+			"app.auth.login-lock-time=15m", "app.auth.forgot-password-max-requests=3",
+			"app.auth.forgot-password-window=15m", "app.auth.register-max-per-ip=10", "app.auth.register-window=1h",
+			"app.auth.verify-mail-max-requests=3", "app.auth.verify-mail-window=15m", "app.auth.mail-per-email-max=5",
+			"app.auth.mail-per-email-window=1h" };
+
 	private final ApplicationContextRunner runner = new ApplicationContextRunner()
-		.withUserConfiguration(WebConfig.class);
+		.withUserConfiguration(WebConfig.class)
+		.withPropertyValues(BASE);
+
+	@Test
+	void missingFrontendUrlStopsStartup() {
+		this.runner.withPropertyValues("app.proxy-secret=s3cret", "app.frontend-url=${APP_FRONTEND_URL}")
+			.run((context) -> assertThat(context).hasFailed()
+				.getFailure()
+				.rootCause()
+				.hasMessageContaining("app.frontend-url"));
+		this.runner.withPropertyValues("app.proxy-secret=s3cret", "app.frontend-url=")
+			.run((context) -> assertThat(context).hasFailed());
+	}
 
 	@Test
 	void requiredButEmptySecretStopsStartup() {
