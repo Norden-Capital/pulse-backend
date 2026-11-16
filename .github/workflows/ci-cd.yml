@@ -1,0 +1,207 @@
+name: CI/CD – Backend
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  # Lowercase on purpose: GHCR rejects uppercase, and the org is "Norden-Capital".
+  # Must match the api image in deploy/compose.prod.yaml.
+  IMAGE_NAME: norden-capital/pulse-backend
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Build & Test
+  # ──────────────────────────────────────────────────────────────────────────
+  build-test:
+    name: Build (Java 21 / Maven)
+    runs-on: ubuntu-latest
+
+    # No Postgres service container: the tests start their own Postgres with
+    # Testcontainers (Docker is on the runner), exactly as on a developer
+    # machine. Flyway builds the schema from the migrations and Hibernate
+    # validates it, which also proves the migrations apply.
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Make mvnw executable
+        run: chmod +x mvnw
+
+      - name: Build JAR
+        run: ./mvnw package -DskipTests -B
+
+      - name: Run tests
+        run: ./mvnw test -B
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Build & Push Docker image  (main branch pushes only)
+  # ──────────────────────────────────────────────────────────────────────────
+  build-push:
+    name: Build & Push Docker image
+    needs: build-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      # The short-sha tag the deploy job runs (IMAGE_TAG on the server).
+      image-tag: ${{ steps.vars.outputs.tag }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      # 7-character short sha, the same length metadata-action uses below.
+      - name: Get short sha
+        id: vars
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v6
+        env:
+          DOCKER_METADATA_SHORT_SHA_LENGTH: 7
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # No prefix: the sha tag is the plain short sha, e.g. abc1234, which
+          # is what IMAGE_TAG and the rollback command use.
+          tags: |
+            type=sha,prefix=,format=short
+            type=raw,value=latest
+
+      # Stop before pushing if the sha tag and the tag the deploy job will use
+      # ever drift apart (otherwise the server would pull a missing tag).
+      - name: Check the image tag the deploy uses
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          WANT: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+        run: |
+          printf '%s\n' "$TAGS"
+          printf '%s\n' "$TAGS" | grep -qxF "$WANT" || { echo "::error::$WANT is not among the image tags"; exit 1; }
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build & push backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. Deploy to VPS over SSH
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to VPS
+    needs: build-push
+    runs-on: ubuntu-latest
+    environment: production
+    # The job's own GITHUB_TOKEN pulls the image, so no personal token is needed.
+    permissions:
+      contents: read
+      packages: read
+    # Never run two deploys at the same time; a newer one waits for the older one.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      # Server-only values (DB password, proxy secret) live in /opt/pulse/.env
+      # on the VPS and are never sent from GitHub.
+      # VPS_HOST_FINGERPRINT must be the ECDSA host key (see deploy/README.md).
+      - name: Copy compose file and backup script to VPS
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ secrets.VPS_HOST_FINGERPRINT }}
+          source: deploy/compose.prod.yaml,deploy/backup.sh
+          target: /opt/pulse
+          strip_components: 1
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        env:
+          IMAGE_TAG: ${{ needs.build-push.outputs.image-tag }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          fingerprint: ${{ secrets.VPS_HOST_FINGERPRINT }}
+          envs: IMAGE_TAG,GHCR_USER,GHCR_TOKEN
+          command_timeout: 10m
+          script: |
+            set -eu
+            cd /opt/pulse
+            [ -n "$IMAGE_TAG" ] || { echo "IMAGE_TAG is empty"; exit 1; }
+            export IMAGE_TAG
+
+            # Short-lived login with this run's token, so the server needs no
+            # stored GHCR password. Log out right after the pull.
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            # Retry: a pull can fail on a short network error (connection reset,
+            # seen over IPv6 to ghcr.io). 5 tries, waiting longer each time.
+            # Layers already pulled are kept, so a retry only fetches the rest.
+            pulled=no
+            try=0
+            for wait in 10 20 40 60 0; do
+              try=$((try + 1))
+              if docker compose -f compose.prod.yaml pull; then pulled=yes; break; fi
+              [ "$wait" -gt 0 ] || break
+              echo "Pull failed (try $try of 5), retrying in ${wait}s"
+              sleep "$wait"
+            done
+            docker logout ghcr.io
+            [ "$pulled" = yes ] || { echo "Pull failed 5 times"; exit 1; }
+
+            # --wait blocks until every service is healthy (the api healthcheck
+            # calls /actuator/health/readiness) and fails the job if not.
+            if ! docker compose -f compose.prod.yaml up -d --remove-orphans --wait --wait-timeout 180; then
+              echo "Deploy failed: API is not healthy. Last logs:"
+              docker compose -f compose.prod.yaml logs --tail 100 api
+              exit 1
+            fi
+
+            # Remove dangling images to keep the disk clean. Only Pulse's own
+            # (by their source label): the VPS is shared with OneBase and Spine.
+            docker image prune -f --filter "label=org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}"
+
+            docker compose -f compose.prod.yaml ps
+            echo "Deployed $IMAGE_TAG"

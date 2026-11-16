@@ -1,0 +1,122 @@
+# Production stack for Pulse on the shared VPS.
+# Lives in /opt/pulse next to a .env file (see .env.example).
+# Run: docker compose -f compose.prod.yaml up -d --wait
+#
+# Isolation from the other apps on the VPS (OneBase, Spine):
+# - own compose project ("pulse") and own network
+# - own Postgres with a named volume and NO published port
+# - the API port is public plain HTTP for now (TEMPORARY, see api ports),
+#   and every /api/** request must carry the proxy secret
+name: pulse
+
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      # Postgres 18 images keep data under /var/lib/postgresql (not .../data).
+      - db-data:/var/lib/postgresql
+    networks:
+      - pulse
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512m # TODO: tune once we see real usage
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  api:
+    image: ghcr.io/norden-capital/pulse-backend:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:?set SPRING_DATASOURCE_URL in .env}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:?set SPRING_DATASOURCE_USERNAME in .env}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:?set SPRING_DATASOURCE_PASSWORD in .env}
+      # Only the Vercel route handler knows it; /api/** answers 403 without it.
+      APP_PROXY_SECRET: ${APP_PROXY_SECRET:?set APP_PROXY_SECRET in .env}
+    ports:
+      # TEMPORARY: public plain HTTP so the Vercel route handler can proxy /api/*
+      # to http://<VPS_HOST>:8091 server-side (the browser only talks to Vercel).
+      # The VPS Caddy belongs to OneBase and is not used by Pulse, so there is no
+      # HTTPS in front yet. Replace with a Cloudflare Tunnel + domain, then set
+      # PULSE_API_BIND=127.0.0.1 and close 8091 in ufw.
+      # Note: Docker-published ports bypass ufw.
+      - "${PULSE_API_BIND:-0.0.0.0}:${PULSE_API_PORT:-8091}:8080"
+    networks:
+      - pulse
+    healthcheck:
+      # The temurin JRE image has no curl/wget we can rely on, so use bash's
+      # /dev/tcp to call the readiness probe and look for "UP".
+      # Actuator is not behind the proxy secret, so this needs no header.
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8080 &&
+          printf 'GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 &&
+          grep -q '"status":"UP"' <&3
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 768m # TODO: tune; the JVM uses 75% of this (MaxRAMPercentage=75)
+    logging: *logging
+
+  # Nightly database backup, kept on this VPS in /opt/pulse/backups (chmod 700).
+  # See backup.sh and RESTORE.md. Separate container: if a backup fails, the
+  # app keeps running.
+  backup:
+    # Same image as db, so pg_dump matches the server version.
+    image: postgres:18
+    restart: unless-stopped
+    init: true
+    entrypoint: ["bash", "/usr/local/bin/pulse-backup.sh"]
+    environment:
+      # Morocco time, same as Spine on this VPS (the offset changes during
+      # Ramadan, so no fixed UTC offset).
+      TZ: Africa/Casablanca
+      BACKUP_HOUR: "3"
+      BACKUP_KEEP: "14"
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      PGUSER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./backup.sh:/usr/local/bin/pulse-backup.sh:ro
+      - ./backups:/backups
+    networks:
+      - pulse
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    logging: *logging
+
+networks:
+  pulse:
+    name: pulse
+
+volumes:
+  db-data:
+    name: pulse-db-data
