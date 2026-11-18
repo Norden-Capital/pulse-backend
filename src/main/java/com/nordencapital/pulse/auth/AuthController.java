@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.nordencapital.pulse.common.ApiException;
+import com.nordencapital.pulse.profile.ProfileRequest;
 import com.nordencapital.pulse.user.User;
 
 /**
@@ -62,12 +63,15 @@ public class AuthController {
 		return ResponseEntity.noContent().build();
 	}
 
-	/** Always 202, whether the email has an account or not. Does not log in. */
+	/**
+	 * Always 202, whether the email has an account or not. Does not log in. The optional
+	 * profile is stored for a new or pending account and discarded otherwise.
+	 */
 	@PostMapping("/register")
 	@ResponseStatus(HttpStatus.ACCEPTED)
 	public void register(@Valid @RequestBody RegisterRequest body, HttpServletRequest request) {
 		try {
-			this.authService.register(body.email(), body.password(), request.getRemoteAddr());
+			this.authService.register(body.email(), body.password(), body.profile(), request.getRemoteAddr());
 		}
 		catch (DataIntegrityViolationException ex) {
 			// Two registers for the same new email at once: the other one won. Same quiet
@@ -141,8 +145,12 @@ public class AuthController {
 		return ResponseEntity.noContent().build();
 	}
 
-	/** The email is trimmed before validation (like login, which also ignores spaces). */
-	public record RegisterRequest(@NotBlank @Size(max = 320) @Email String email, @NotNull String password) {
+	/**
+	 * The email is trimmed before validation (like login, which also ignores spaces).
+	 * @param profile the onboarding answers (and optional manual targets), or null
+	 */
+	public record RegisterRequest(@NotBlank @Size(max = 320) @Email String email, @NotNull String password,
+			@Valid ProfileRequest profile) {
 
 		public RegisterRequest {
 			email = (email != null) ? email.strip() : null;

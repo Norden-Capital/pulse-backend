@@ -29,6 +29,7 @@ import com.nordencapital.pulse.auth.AuthLimiters;
 import com.nordencapital.pulse.config.ProxySecretFilter;
 import com.nordencapital.pulse.mail.MailMessage;
 import com.nordencapital.pulse.mail.MailSender;
+import com.nordencapital.pulse.profile.PlanLimiter;
 import com.nordencapital.pulse.user.User;
 import com.nordencapital.pulse.user.UserRepository;
 import com.nordencapital.pulse.user.UserStatus;
@@ -72,14 +73,19 @@ public abstract class IntegrationTestBase {
 	@Autowired
 	protected CapturingMailSender mails;
 
+	@Autowired
+	protected PlanLimiter planLimiter;
+
 	@BeforeEach
 	void cleanDatabase() {
 		this.jdbc.update("DELETE FROM spring_session");
 		this.jdbc.update("DELETE FROM passkeys");
+		this.jdbc.update("DELETE FROM user_profiles");
 		this.jdbc.update("DELETE FROM auth_tokens");
 		this.jdbc.update("DELETE FROM login_events");
 		this.jdbc.update("DELETE FROM users");
 		this.limiters.clearAll();
+		this.planLimiter.clear();
 		this.mails.clear();
 	}
 
@@ -217,6 +223,12 @@ public abstract class IntegrationTestBase {
 
 		public MvcTestResult register(String email, String password) {
 			return post("/api/auth/register", "{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}");
+		}
+
+		/** Register with a {@code profile} object (raw JSON). */
+		public MvcTestResult register(String email, String password, String profileJson) {
+			return post("/api/auth/register", "{\"email\":\"" + email + "\",\"password\":\"" + password
+					+ "\",\"profile\":" + profileJson + "}");
 		}
 
 		public String cookie(String name) {

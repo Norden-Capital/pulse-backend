@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 import com.nordencapital.pulse.common.ApiException;
 import com.nordencapital.pulse.common.Emails;
 import com.nordencapital.pulse.mail.AuthMails;
+import com.nordencapital.pulse.profile.ProfileRequest;
+import com.nordencapital.pulse.profile.ProfileService;
 import com.nordencapital.pulse.user.User;
 import com.nordencapital.pulse.user.UserRepository;
 import com.nordencapital.pulse.user.UserStatus;
@@ -41,6 +43,8 @@ public class AuthService {
 
 	private final LoginEvents loginEvents;
 
+	private final ProfileService profiles;
+
 	private final Clock clock;
 
 	/**
@@ -50,7 +54,8 @@ public class AuthService {
 	private final String dummyHash;
 
 	public AuthService(UserRepository users, AuthTokenService tokens, PasswordEncoder passwordEncoder,
-			AuthMails mails, UserSessions sessions, AuthLimiters limiters, LoginEvents loginEvents, Clock clock) {
+			AuthMails mails, UserSessions sessions, AuthLimiters limiters, LoginEvents loginEvents, ProfileService profiles,
+			Clock clock) {
 		this.users = users;
 		this.tokens = tokens;
 		this.passwordEncoder = passwordEncoder;
@@ -58,6 +63,7 @@ public class AuthService {
 		this.sessions = sessions;
 		this.limiters = limiters;
 		this.loginEvents = loginEvents;
+		this.profiles = profiles;
 		this.clock = clock;
 		this.dummyHash = passwordEncoder.encode(UUID.randomUUID().toString());
 	}
@@ -71,13 +77,17 @@ public class AuthService {
 	 * <li>ACTIVE: nothing changes, "account exists" email;</li>
 	 * <li>DISABLED: nothing.</li>
 	 * </ul>
+	 * The optional onboarding profile is stored with a new account, replaces the profile of
+	 * a pending one (kept when this register has none), and is discarded for ACTIVE and
+	 * DISABLED accounts (never overwrite a real account).
+	 * <p>
 	 * Over the email limits, nothing changes and nothing is sent. The password is hashed
 	 * in every case, so the response time does not depend on the branch.
 	 * @throws ApiException 400 {@code weak_password} or 429 {@code too_many_attempts}
 	 * (too many registers from this IP)
 	 */
 	@Transactional
-	public void register(String email, String password, String clientIp) {
+	public void register(String email, String password, ProfileRequest profile, String clientIp) {
 		PasswordPolicy.check(password);
 		if (!this.limiters.register().tryAcquire(clientIp)) {
 			throw tooManyAttempts();
@@ -89,6 +99,9 @@ public class AuthService {
 		if (found.isEmpty()) {
 			if (this.limiters.tryVerifyMail(normalized, clientIp)) {
 				User user = this.users.saveAndFlush(User.register(normalized, hash, now));
+				if (profile != null) {
+					this.profiles.saveFromRegister(user, profile);
+				}
 				this.mails.sendVerify(user.getEmail(), this.tokens.issue(user, TokenPurpose.VERIFY));
 			}
 			return;
@@ -98,6 +111,9 @@ public class AuthService {
 			case PENDING_VERIFICATION -> {
 				if (this.limiters.tryVerifyMail(normalized, clientIp)) {
 					user.setPasswordHash(hash, now);
+					if (profile != null) {
+						this.profiles.saveFromRegister(user, profile);
+					}
 					this.mails.sendVerify(user.getEmail(), this.tokens.issue(user, TokenPurpose.VERIFY));
 				}
 			}

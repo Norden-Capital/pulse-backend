@@ -10,7 +10,7 @@ class PulseApplicationTests extends IntegrationTestBase {
 	void contextLoadsAndFlywayRanAllMigrations() {
 		assertThat(this.jdbc.queryForList(
 				"SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank", String.class))
-			.containsExactly("1", "2", "3", "4", "5");
+			.containsExactly("1", "2", "3", "4", "5", "6");
 	}
 
 }

@@ -5,9 +5,12 @@ nutrition, progress, AI assistant) that works fully without wearables.
 
 Java 21, Spring Boot 4, PostgreSQL 18, Flyway, Maven wrapper.
 
-Status: **Module 1 (auth)**. Register with email verification, login on server
-sessions, password reset, passkeys (Face ID) and sign-in history. The API contract is
-`docs/api/auth.md` in the project hub (outside this repo).
+Status: **Module 2 (onboarding and profile)**. Module 1: register with email
+verification, login on server sessions, password reset, passkeys (Face ID) and sign-in
+history. Module 2: the public onboarding plan (`POST /api/onboarding/plan`, formula
+`pulse-energy-v1`), the profile sent with register, and `GET /api/me/profile`. The API
+contracts are `docs/api/auth.md` and `docs/api/onboarding-profile.md` in the project hub
+(outside this repo).
 
 ## Run locally
 

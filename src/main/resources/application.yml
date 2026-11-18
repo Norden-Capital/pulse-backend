@@ -78,3 +78,7 @@ app:
     # Every auth email to one address, from any IP.
     mail-per-email-max: 5
     mail-per-email-window: 1h
+  onboarding:
+    # Public plan calculation (POST /api/onboarding/plan): at most this many per IP.
+    plan-max-per-ip: 60
+    plan-window: 10m

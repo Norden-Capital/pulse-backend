@@ -27,7 +27,8 @@ import org.springframework.session.web.http.CookieSerializer;
 import org.springframework.session.web.http.DefaultCookieSerializer;
 
 /**
- * Deny by default. Public: ping, health, and the register / login / password endpoints.
+ * Deny by default. Public: ping, health, the onboarding plan, and the register / login /
+ * password endpoints.
  * Everything else needs a logged-in user. There are no roles.
  * <p>
  * Sessions are server-side (Spring Session JDBC, SESSION cookie). CSRF is on for every
@@ -48,6 +49,7 @@ public class SecurityConfig {
 			.requestMatchers("/error").permitAll()
 			.requestMatchers(HttpMethod.GET, "/api/ping", "/actuator/health", "/actuator/health/**").permitAll()
 			.requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/api/auth/token/*").permitAll()
+			.requestMatchers(HttpMethod.POST, "/api/onboarding/plan").permitAll()
 			.requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/resend-verification",
 					"/api/auth/verify-email", "/api/auth/login", "/api/auth/logout", "/api/auth/forgot-password",
 					"/api/auth/set-password", "/api/auth/passkey/options", "/api/auth/passkey/login")
